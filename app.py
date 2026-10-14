@@ -1,4 +1,4 @@
-﻿import streamlit as st
+import streamlit as st
 import pandas as pd
 from datetime import datetime
 import streamlit.components.v1 as components
@@ -18,9 +18,10 @@ if "inventario" not in st.session_state:
 
 # Procesar si viene un ítem por parámetro de URL (desde el componente web)
 if "item" in st.query_params:
-    nuevo_item = st.query_params["item"]
-    if nuevo_item and nuevo_item.strip():
-        item_limpio = nuevo_item.strip().capitalize()
+    raw_item = st.query_params["item"]
+    nuevo_item = raw_item[0] if isinstance(raw_item, list) else raw_item
+    if nuevo_item and str(nuevo_item).strip():
+        item_limpio = str(nuevo_item).strip().capitalize()
         item_limpio = " ".join(item_limpio.split())
         
         if item_limpio in st.session_state.inventario:
@@ -153,7 +154,6 @@ input_voice_component = """
                 const speechResult = event.results[0][0].transcript;
                 inputField.value = speechResult;
                 statusMsg.innerText = "✅ ¡Reconocido! Agregando...";
-                // Enviar automáticamente al detectar la voz
                 setTimeout(() => {
                     document.getElementById('itemForm').requestSubmit();
                 }, 300);
@@ -182,8 +182,8 @@ input_voice_component = """
             event.preventDefault();
             const val = document.getElementById('itemInput').value.trim();
             if (val) {
-                // Redirigir la página padre (Streamlit) pasando el parámetro en la URL
-                window.parent.location.href = window.parent.location.pathname + '?item=' + encodeURIComponent(val);
+                // Usar location.search en lugar de location.href para mantener la sesión activa en Streamlit
+                window.parent.location.search = '?item=' + encodeURIComponent(val);
             }
         }
     </script>
