@@ -16,10 +16,10 @@ st.markdown("---")
 if "inventario" not in st.session_state:
     st.session_state.inventario = {}
 
-# Procesar si viene un ítem por parámetro de voz (query params)
+# Procesar si viene un ítem por parámetro de URL (desde el componente web)
 if "item" in st.query_params:
     nuevo_item = st.query_params["item"]
-    if nuevo_item.strip():
+    if nuevo_item and nuevo_item.strip():
         item_limpio = nuevo_item.strip().capitalize()
         item_limpio = " ".join(item_limpio.split())
         
@@ -28,100 +28,170 @@ if "item" in st.query_params:
         else:
             st.session_state.inventario[item_limpio] = 1
         
-        # Limpiar query param para evitar duplicaciones al refrescar
+        # Limpiar query param y recargar para evitar duplicados
         st.query_params.clear()
         st.rerun()
 
-st.subheader("🎙️ Dictado Directo por Voz")
-st.markdown("Tocá el botón grande de abajo, decí el nombre del ítem en voz alta (ej: *'Silla de madera'* o *'Proyector'*) y se registrará automáticamente sumando `+1`.")
+st.subheader("📝 Ingreso de Ítems (Voz o Teclado)")
+st.markdown("Tocá el ícono de **micrófono 🎙️** dentro del cuadro para dictar el objeto, o escribilo manualmente. Se agregará al instante.")
 
-# Componente HTML/JS con botón de reconocimiento de voz nativo del navegador
-voice_component = """
+# Componente HTML/JS con input integrado y botón de micrófono adentro
+input_voice_component = """
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <style>
-        body { font-family: sans-serif; text-align: center; background-color: transparent; margin: 0; padding: 5px; }
+        body { font-family: sans-serif; background-color: transparent; margin: 0; padding: 5px; }
+        .input-container {
+            display: flex;
+            align-items: center;
+            background: white;
+            border: 2px solid #ccc;
+            border-radius: 12px;
+            padding: 4px 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+            max-width: 100%;
+            transition: all 0.3s;
+        }
+        .input-container:focus-within {
+            border-color: #ff4b4b;
+            box-shadow: 0 0 8px rgba(255, 75, 75, 0.3);
+        }
+        .text-input {
+            flex: 1;
+            border: none;
+            outline: none;
+            font-size: 16px;
+            padding: 10px;
+            background: transparent;
+            color: #31333F;
+        }
         .mic-btn {
-            background: linear-gradient(135deg, #ff4b4b, #ff6b6b);
+            background: #ff4b4b;
             color: white;
             border: none;
-            border-radius: 50px;
-            padding: 18px 24px;
-            font-size: 18px;
-            font-weight: bold;
+            border-radius: 8px;
+            width: 44px;
+            height: 44px;
+            font-size: 20px;
             cursor: pointer;
-            box-shadow: 0 4px 15px rgba(255, 75, 75, 0.4);
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 12px;
-            margin: 0 auto;
-            width: 100%;
-            max-width: 320px;
-            transition: all 0.2s ease;
+            transition: background 0.2s, transform 0.1s;
+            flex-shrink: 0;
+            margin-left: 5px;
         }
-        .mic-btn:active { transform: scale(0.96); background: linear-gradient(135deg, #e03b3b, #ef5350); }
-        .status { margin-top: 10px; font-size: 13px; color: #888; font-weight: 500; }
+        .mic-btn:active { transform: scale(0.92); background: #e03b3b; }
+        .mic-btn.listening { background: #28a745; animation: pulse 1.5s infinite; }
+        .submit-btn {
+            background: #2b313e;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 0 16px;
+            height: 44px;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-left: 5px;
+            flex-shrink: 0;
+        }
+        .submit-btn:active { background: #000; }
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4); }
+            70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(40, 167, 69, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+        }
+        .status { font-size: 12px; color: #666; margin-top: 6px; text-align: center; }
     </style>
 </head>
 <body>
-    <button class="mic-btn" onclick="startRecording()">
-        🎙️ Tocar para Hablar
-    </button>
-    <div class="status" id="status">Listo para escuchar...</div>
+    <form id="itemForm" onsubmit="enviarItem(event)">
+        <div class="input-container">
+            <input type="text" id="itemInput" class="text-input" placeholder="Ej: Silla, Banco, Proyector..." autocomplete="off" required>
+            <button type="button" class="mic-btn" id="micBtn" onclick="toggleSpeech()" title="Dictar por voz">🎙️</button>
+            <button type="submit" class="submit-btn" title="Agregar ítem">➕</button>
+        </div>
+        <div class="status" id="statusMsg">Toca el micrófono para hablar o escribe el ítem</div>
+    </form>
 
     <script>
-        function startRecording() {
+        let recognition = null;
+        let isListening = false;
+
+        function toggleSpeech() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
-                document.getElementById('status').innerText = "Tu navegador no soporta voz. Usá Google Chrome o Safari.";
+                alert("Tu navegador no soporta reconocimiento de voz. Usá Google Chrome.");
                 return;
             }
-            
-            const recognition = new SpeechRecognition();
-            recognition.lang = 'es-AR'; // Configurado para español
+
+            if (isListening) {
+                if (recognition) recognition.stop();
+                return;
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.lang = 'es-AR';
             recognition.interimResults = false;
             recognition.maxAlternatives = 1;
 
-            document.getElementById('status').innerText = "🎤 Escuchando... Hablá ahora.";
+            const micBtn = document.getElementById('micBtn');
+            const statusMsg = document.getElementById('statusMsg');
+            const inputField = document.getElementById('itemInput');
+
+            recognition.onstart = function() {
+                isListening = true;
+                micBtn.classList.add('listening');
+                micBtn.innerHTML = "⏹️";
+                statusMsg.innerText = "🎤 Escuchando... Hablá ahora.";
+            };
 
             recognition.onresult = function(event) {
                 const speechResult = event.results[0][0].transcript;
-                document.getElementById('status').innerText = "✅ Registrado: " + speechResult;
-                // Recargar la app pasando el texto por URL
-                window.parent.location.search = '?item=' + encodeURIComponent(speechResult);
+                inputField.value = speechResult;
+                statusMsg.innerText = "✅ ¡Reconocido! Agregando...";
+                // Enviar automáticamente al detectar la voz
+                setTimeout(() => {
+                    document.getElementById('itemForm').requestSubmit();
+                }, 300);
             };
 
             recognition.onerror = function(event) {
-                document.getElementById('status').innerText = "⚠️ Error de audio: " + event.error;
+                statusMsg.innerText = "⚠️ Error: " + event.error;
+                stopListeningState();
+            };
+
+            recognition.onend = function() {
+                stopListeningState();
             };
 
             recognition.start();
+        }
+
+        function stopListeningState() {
+            isListening = false;
+            const micBtn = document.getElementById('micBtn');
+            micBtn.classList.remove('listening');
+            micBtn.innerHTML = "🎙️";
+        }
+
+        function enviarItem(event) {
+            event.preventDefault();
+            const val = document.getElementById('itemInput').value.trim();
+            if (val) {
+                // Redirigir la página padre (Streamlit) pasando el parámetro en la URL
+                window.parent.location.href = window.parent.location.pathname + '?item=' + encodeURIComponent(val);
+            }
         }
     </script>
 </body>
 </html>
 """
 
-components.html(voice_component, height=110)
-
-with st.expander("⌨️ ¿Preferís escribir o corregir manualmente?"):
-    with st.form(key="form_item", clear_on_submit=True):
-        nuevo_item_manual = st.text_input("Nombre del ítem:", placeholder="Ej: Mesa escolar, Computadora...")
-        submitted = st.form_submit_button("➕ Agregar / Sumar 1")
-        
-        if submitted and nuevo_item_manual.strip():
-            item_limpio = nuevo_item_manual.strip().capitalize()
-            item_limpio = " ".join(item_limpio.split())
-            
-            if item_limpio in st.session_state.inventario:
-                st.session_state.inventario[item_limpio] += 1
-            else:
-                st.session_state.inventario[item_limpio] = 1
-            st.success(f"Registrado: **{item_limpio}** (+1)")
-            st.rerun()
+components.html(input_voice_component, height=95)
 
 st.markdown("---")
 st.subheader("📋 Planilla Actual en Tiempo Real")
@@ -158,4 +228,4 @@ if st.session_state.inventario:
             type="primary"
         )
 else:
-    st.info("Todavía no hay ítems cargados. Tocá el botón de voz o escribí arriba para comenzar.")
+    st.info("Todavía no hay ítems cargados. Tocá el micrófono en la barra de arriba o dictá para comenzar.")
